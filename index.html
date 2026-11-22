@@ -33,7 +33,7 @@
   @keyframes twinkle{0%,100%{opacity:0;transform:scale(.4)}50%{opacity:1;transform:scale(1)}}
 
   .screen{
-    position:relative;z-index:1;min-height:100vh;padding:28px 16px 190px;
+    position:relative;z-index:1;min-height:100vh;padding:28px 16px 90px;
     display:none;flex-direction:column;align-items:center;justify-content:center;text-align:center;
   }
   .screen.active{display:flex;animation:fadeIn .7s cubic-bezier(.2,.8,.2,1)}
@@ -199,12 +199,12 @@
   .small-link{margin-top:8px;background:none;border:none;color:#fff;text-decoration:underline;font-family:inherit;font-size:13px;cursor:pointer;opacity:.85}
 
   /* музыка */
-  #music{
-    position:fixed;left:50%;bottom:12px;transform:translateX(-50%);z-index:40;
-    width:min(450px,calc(100% - 20px));border-radius:16px;overflow:hidden;
-    box-shadow:0 14px 34px -8px rgba(122,18,56,.5);
+  #ytWrap{position:fixed;left:0;bottom:0;width:2px;height:2px;opacity:.01;pointer-events:none;z-index:-1;overflow:hidden}
+  #musicBtn{
+    position:fixed;right:16px;bottom:16px;z-index:40;width:52px;height:52px;border-radius:50%;border:none;cursor:pointer;
+    background:#fff;font-size:22px;box-shadow:0 10px 24px -6px rgba(122,18,56,.5);display:grid;place-items:center
   }
-  #music iframe{display:block;border:0}
+  #musicBtn.on{animation:beat 1.4s infinite}
 
   .sent{margin-top:6px;font-size:12px;color:#fff;opacity:.85;min-height:16px}
   .capture .gold{background:none!important;color:#f5d77a!important;-webkit-text-fill-color:#f5d77a}
@@ -313,7 +313,8 @@
 </section>
 
 <!-- музыка -->
-<div id="music"><div id="spotify"></div></div>
+<div id="ytWrap"><div id="yt"></div></div>
+<button id="musicBtn" aria-label="Музыка">🎵</button>
 
 <script>
   /* ====== НАСТРОЙКИ TELEGRAM: впиши сюда токен бота и свой chat id ====== */
@@ -345,51 +346,54 @@
   setInterval(spawnHeart,700);
   for(let i=0;i<8;i++) setTimeout(spawnHeart,i*200);
 
-  /* ---------- музыка: My Moon My Man — Feist (Spotify) ---------- */
-  const TRACK = '4fQVQKIiidREPI0MhFEuDn';
-  let spotify = null, wantPlay = false, fallbackUsed = false, started = false;
-  function plainPlayer(){
-    if (spotify || fallbackUsed) return;
-    fallbackUsed = true;
-    document.getElementById('music').innerHTML =
-      '<iframe src="https://open.spotify.com/embed/track/'+TRACK+'?utm_source=generator&theme=0" width="100%" height="152" frameborder="0" allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture" allowfullscreen></iframe>';
-  }
-  window.onSpotifyIframeApiReady = (IFrameAPI) => {
-    if (fallbackUsed) return;
-    IFrameAPI.createController(
-      document.getElementById('spotify'),
-      { uri:'spotify:track:'+TRACK, width:'100%', height:152 },
-      (ctrl) => {
-        spotify = ctrl;
-        ctrl.addListener('ready', () => { if (!started){ try{ ctrl.play(); }catch(_){} } });   // пробуем сразу при входе
-        ctrl.addListener('playback_update', e => {
-          const d = e.data;
-          if (d && !d.isPaused && d.position > 0) started = true;   // песня уже играет — больше не перезапускаем
-          // по кругу
-          if (d && d.duration && d.position >= d.duration - 500 && !d.isPaused) {
-            setTimeout(()=>{ try{ ctrl.seek(0); ctrl.resume(); }catch(_){} }, 400);
-          }
-        });
-        if (wantPlay) playMusic();
+  /* ---------- музыка: My Moon My Man — Feist (YouTube) ---------- */
+  const VIDEOS = ['lBJYCSBmUCM','MZ7DndMYJeo','yKqDfxIvIrw','ltYq-jalYm0'];   // запасные, если какое-то видео не встраивается
+  const VOLUME = 45;                  // громкость 0–100
+  let yt = null, ytReady = false, vIdx = 0, playing = false, wantPlay = false, userPaused = false;
+  const musicBtn = document.getElementById('musicBtn');
+  window.onYouTubeIframeAPIReady = () => {
+    yt = new YT.Player('yt', {
+      width: 2, height: 2, videoId: VIDEOS[0],
+      playerVars: { autoplay: 1, controls: 0, playsinline: 1, rel: 0, disablekb: 1 },
+      events: {
+        onReady: () => {
+          ytReady = true;
+          yt.setVolume(VOLUME);
+          try { yt.playVideo(); } catch(e){}      // пробуем сразу при входе
+          if (wantPlay) startMusic();
+        },
+        onStateChange: (e) => {
+          if (e.data === YT.PlayerState.PLAYING){ playing = true; musicBtn.classList.add('on'); musicBtn.textContent='🎵'; }
+          if (e.data === YT.PlayerState.PAUSED){ playing = false; musicBtn.classList.remove('on'); if (!userPaused) musicBtn.textContent='▶️'; }
+          if (e.data === YT.PlayerState.ENDED){ yt.seekTo(0); yt.playVideo(); }   // по кругу
+        },
+        onError: () => {
+          vIdx++;
+          if (vIdx < VIDEOS.length){ yt.loadVideoById(VIDEOS[vIdx]); }
+        }
       }
-    );
+    });
   };
-  const sp = document.createElement('script');
-  sp.src = 'https://open.spotify.com/embed/iframe-api/v1';
-  sp.async = true;
-  sp.onerror = plainPlayer;
-  document.head.appendChild(sp);
-  setTimeout(plainPlayer, 5000);   // если API не загрузился — обычный плеер
+  const yts = document.createElement('script');
+  yts.src = 'https://www.youtube.com/iframe_api';
+  document.head.appendChild(yts);
 
-  let tapPlayed = false;
-  function playMusic(){
-    if (started || tapPlayed) return;   // уже играет или уже запускали — не перезапускаем
+  function startMusic(){
+    if (userPaused || playing) return;      // уже играет — не трогаем, песня не перезапускается
     wantPlay = true;
-    if (spotify){ tapPlayed = true; try{ spotify.play(); }catch(e){} }
+    if (!ytReady) return;
+    try { yt.unMute(); yt.setVolume(VOLUME); yt.playVideo(); } catch(e){}
   }
-  // любое первое касание страницы запускает песню
-  ['pointerdown','touchstart','keydown'].forEach(ev =>
-    document.addEventListener(ev, playMusic, { once:true, passive:true }));
+  const playMusic = startMusic;
+  // первое же касание страницы включает песню (браузеры требуют хотя бы одно касание)
+  ['pointerdown','touchend','click','keydown'].forEach(ev =>
+    document.addEventListener(ev, startMusic, { capture:true, passive:true }));
+  musicBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!ytReady) return;
+    if (playing){ userPaused = true; yt.pauseVideo(); musicBtn.textContent='🔇'; }
+    else { userPaused = false; startMusic(); }
+  });
 
   /* ---------- 0: конверт ---------- */
   let envOpened = false;
