@@ -199,7 +199,7 @@
   .small-link{margin-top:8px;background:none;border:none;color:#fff;text-decoration:underline;font-family:inherit;font-size:13px;cursor:pointer;opacity:.85}
 
   /* музыка */
-  #ytWrap{position:fixed;left:0;bottom:0;width:2px;height:2px;opacity:.01;pointer-events:none;z-index:-1;overflow:hidden}
+  #ytWrap{position:fixed;left:0;bottom:0;width:200px;height:200px;opacity:0;pointer-events:none;z-index:0}
   #musicBtn{
     position:fixed;right:16px;bottom:16px;z-index:40;width:52px;height:52px;border-radius:50%;border:none;cursor:pointer;
     background:#fff;font-size:22px;box-shadow:0 10px 24px -6px rgba(122,18,56,.5);display:grid;place-items:center
@@ -346,31 +346,44 @@
   setInterval(spawnHeart,700);
   for(let i=0;i<8;i++) setTimeout(spawnHeart,i*200);
 
-  /* ---------- музыка: My Moon My Man — Feist (YouTube) ---------- */
-  const VIDEOS = ['lBJYCSBmUCM','MZ7DndMYJeo','yKqDfxIvIrw','ltYq-jalYm0'];   // запасные, если какое-то видео не встраивается
-  const VOLUME = 45;                  // громкость 0–100
-  let yt = null, ytReady = false, vIdx = 0, playing = false, wantPlay = false, userPaused = false;
+  /* ---------- музыка: My Moon My Man — Feist ---------- */
+  // 1) если рядом с сайтом лежит song.mp3 — играет он (самый надёжный вариант)
+  // 2) иначе — скрытый YouTube-плеер
+  const VIDEOS = ['lBJYCSBmUCM','MZ7DndMYJeo','yKqDfxIvIrw','ltYq-jalYm0'];
+  const VOLUME = 45;                       // громкость 0–100
   const musicBtn = document.getElementById('musicBtn');
+  let playing = false, userPaused = false, wantPlay = false;
+
+  function setOn(on){
+    playing = on;
+    musicBtn.classList.toggle('on', on);
+    musicBtn.textContent = on ? '🎵' : (userPaused ? '🔇' : '▶️');
+  }
+
+  // --- mp3 ---
+  const audio = new Audio('song.mp3');
+  audio.loop = true; audio.volume = VOLUME/100; audio.preload = 'auto';
+  let mp3ok = false;
+  audio.addEventListener('canplay', () => { mp3ok = true; if (!playing) tryAutoplay(); });
+  audio.addEventListener('error',   () => { mp3ok = false; });
+  audio.addEventListener('playing', () => { setOn(true); try{ yt && yt.pauseVideo(); }catch(e){} });
+  audio.addEventListener('pause',   () => setOn(false));
+
+  // --- YouTube ---
+  let yt = null, ytReady = false, vIdx = 0;
   window.onYouTubeIframeAPIReady = () => {
     yt = new YT.Player('yt', {
-      width: 2, height: 2, videoId: VIDEOS[0],
-      playerVars: { autoplay: 1, controls: 0, playsinline: 1, rel: 0, disablekb: 1 },
+      width: 200, height: 200, videoId: VIDEOS[0],
+      playerVars: { autoplay: 0, controls: 0, playsinline: 1, rel: 0, disablekb: 1 },
       events: {
-        onReady: () => {
-          ytReady = true;
-          yt.setVolume(VOLUME);
-          try { yt.playVideo(); } catch(e){}      // пробуем сразу при входе
-          if (wantPlay) startMusic();
-        },
+        onReady: () => { ytReady = true; yt.setVolume(VOLUME); if (wantPlay) startMusic(); else tryAutoplay(); },
         onStateChange: (e) => {
-          if (e.data === YT.PlayerState.PLAYING){ playing = true; musicBtn.classList.add('on'); musicBtn.textContent='🎵'; }
-          if (e.data === YT.PlayerState.PAUSED){ playing = false; musicBtn.classList.remove('on'); if (!userPaused) musicBtn.textContent='▶️'; }
+          if (mp3ok) return;
+          if (e.data === YT.PlayerState.PLAYING) setOn(true);
+          if (e.data === YT.PlayerState.PAUSED)  setOn(false);
           if (e.data === YT.PlayerState.ENDED){ yt.seekTo(0); yt.playVideo(); }   // по кругу
         },
-        onError: () => {
-          vIdx++;
-          if (vIdx < VIDEOS.length){ yt.loadVideoById(VIDEOS[vIdx]); }
-        }
+        onError: () => { vIdx++; if (vIdx < VIDEOS.length) yt.cueVideoById(VIDEOS[vIdx]); }
       }
     });
   };
@@ -378,21 +391,32 @@
   yts.src = 'https://www.youtube.com/iframe_api';
   document.head.appendChild(yts);
 
+  // попытка включить сразу при входе (сработает, если браузер разрешит)
+  function tryAutoplay(){
+    if (playing || userPaused) return;
+    if (mp3ok){ audio.play().catch(()=>{}); return; }
+    if (ytReady){ try{ yt.playVideo(); }catch(e){} }
+  }
+  // включение от касания — браузер это всегда разрешает
   function startMusic(){
-    if (userPaused || playing) return;      // уже играет — не трогаем, песня не перезапускается
+    if (playing || userPaused) return;     // уже играет — не перезапускаем
     wantPlay = true;
-    if (!ytReady) return;
-    try { yt.unMute(); yt.setVolume(VOLUME); yt.playVideo(); } catch(e){}
+    if (mp3ok || audio.readyState >= 2){ audio.play().catch(()=>{}); return; }
+    if (ytReady){ try{ yt.unMute(); yt.setVolume(VOLUME); yt.playVideo(); }catch(e){} }
   }
   const playMusic = startMusic;
-  // первое же касание страницы включает песню (браузеры требуют хотя бы одно касание)
   ['pointerdown','touchend','click','keydown'].forEach(ev =>
     document.addEventListener(ev, startMusic, { capture:true, passive:true }));
+
   musicBtn.addEventListener('click', (e) => {
     e.stopPropagation();
-    if (!ytReady) return;
-    if (playing){ userPaused = true; yt.pauseVideo(); musicBtn.textContent='🔇'; }
-    else { userPaused = false; startMusic(); }
+    if (playing){
+      userPaused = true;
+      if (mp3ok) audio.pause(); else if (ytReady) yt.pauseVideo();
+      setOn(false);
+    } else {
+      userPaused = false; startMusic();
+    }
   });
 
   /* ---------- 0: конверт ---------- */
