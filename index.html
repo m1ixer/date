@@ -338,7 +338,7 @@
 
   /* ---------- музыка: My Moon My Man — Feist (Spotify) ---------- */
   const TRACK = '4fQVQKIiidREPI0MhFEuDn';
-  let spotify = null, wantPlay = false, fallbackUsed = false;
+  let spotify = null, wantPlay = false, fallbackUsed = false, started = false;
   function plainPlayer(){
     if (spotify || fallbackUsed) return;
     fallbackUsed = true;
@@ -352,9 +352,11 @@
       { uri:'spotify:track:'+TRACK, width:'100%', height:152 },
       (ctrl) => {
         spotify = ctrl;
-        ctrl.addListener('ready', () => { try{ ctrl.play(); }catch(_){} });   // пробуем сразу при входе
+        ctrl.addListener('ready', () => { if (!started){ try{ ctrl.play(); }catch(_){} } });   // пробуем сразу при входе
         ctrl.addListener('playback_update', e => {
-          const d = e.data;   // по кругу
+          const d = e.data;
+          if (d && !d.isPaused && d.position > 0) started = true;   // песня уже играет — больше не перезапускаем
+          // по кругу
           if (d && d.duration && d.position >= d.duration - 500 && !d.isPaused) {
             setTimeout(()=>{ try{ ctrl.seek(0); ctrl.resume(); }catch(_){} }, 400);
           }
@@ -370,9 +372,11 @@
   document.head.appendChild(sp);
   setTimeout(plainPlayer, 5000);   // если API не загрузился — обычный плеер
 
+  let tapPlayed = false;
   function playMusic(){
+    if (started || tapPlayed) return;   // уже играет или уже запускали — не перезапускаем
     wantPlay = true;
-    if (spotify){ try{ spotify.play(); }catch(e){} }
+    if (spotify){ tapPlayed = true; try{ spotify.play(); }catch(e){} }
   }
   // любое первое касание страницы запускает песню
   ['pointerdown','touchstart','keydown'].forEach(ev =>
